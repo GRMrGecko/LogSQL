@@ -1,5 +1,7 @@
 #!/bin/bash
 
+INSTALLNAMETOOL=`which install_name_tool` # Fixes Mac OS X issue with linking.
+
 ZNCBUILD=`which znc-buildmod`
 if [ "$ZNCBUILD" = "" ]; then
 	echo "Where is znc-buildmod:"
@@ -21,6 +23,8 @@ if [ "$ZNCCONFIG" = "" ]; then
 	ZNCCONFIG="$HOME/.znc"
 fi
 
-LDFLAGS="-L $MYSQL/lib -lmysqlclient -I $MYSQL/include" $ZNCBUILD logmysql.cpp
-install_name_tool -change libmysqlclient.18.dylib "$MYSQL/libmysqlclient.dylib" logmysql.so
+LDFLAGS="-L $MYSQL/lib -lmysqlclient -I $MYSQL/include" "$ZNCBUILD" logmysql.cpp
+if [ "$INSTALLNAMETOOL" != "" ]; then
+	"$INSTALLNAMETOOL" -change libmysqlclient.18.dylib "$MYSQL/libmysqlclient.dylib" logmysql.so
+fi
 cp logmysql.so "$ZNCCONFIG/modules/logmysql.so"
