@@ -1,0 +1,25 @@
+#!/bin/bash
+
+ZNCBUILD=`which znc-buildmod`
+if [ "$ZNCBUILD" = "" ]; then
+	echo "Where is znc-buildmod:"
+	read ZNCBUILD
+	if [ "$ZNCBUILD" = "" ]; then
+		exit
+	fi
+fi
+
+echo "Where is SQLite path [/usr]:"
+read SQLITE
+if [ "$SQLITE" = "" ]; then
+	SQLITE="/usr"
+fi
+
+echo "Where is ZNC configuration path [$HOME/.znc]:"
+read ZNCCONFIG
+if [ "$ZNCCONFIG" = "" ]; then
+	ZNCCONFIG="$HOME/.znc"
+fi
+
+LDFLAGS="-L $SQLITE/lib -lsqlite3 -I $SQLITE/include" $ZNCBUILD logsqlite.cpp
+cp logsqlite.so "$ZNCCONFIG/modules/logsqlite.so"

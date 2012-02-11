@@ -1,0 +1,26 @@
+#!/bin/bash
+
+ZNCBUILD=`which znc-buildmod`
+if [ "$ZNCBUILD" = "" ]; then
+	echo "Where is znc-buildmod:"
+	read ZNCBUILD
+	if [ "$ZNCBUILD" = "" ]; then
+		exit
+	fi
+fi
+
+echo "Where is MySQL path [/usr/local/mysql]:"
+read MYSQL
+if [ "$MYSQL" = "" ]; then
+	MYSQL="/usr/local/mysql"
+fi
+
+echo "Where is ZNC configuration path [$HOME/.znc]:"
+read ZNCCONFIG
+if [ "$ZNCCONFIG" = "" ]; then
+	ZNCCONFIG="$HOME/.znc"
+fi
+
+LDFLAGS="-L $MYSQL/lib -lmysqlclient -I $MYSQL/include" $ZNCBUILD logmysql.cpp
+install_name_tool -change libmysqlclient.18.dylib "$MYSQL/libmysqlclient.dylib" logmysql.so
+cp logmysql.so "$ZNCCONFIG/modules/logmysql.so"
