@@ -47,20 +47,14 @@ public:
     void ReplayAllCommand(const CString &sLine) {
         CString sArgs = sLine.Token(1, true);
 
-        if (sArgs.empty()) {
-            CString status = (replayAll ? "On" : "Off");
-            PutModule("ReplayAll is set to: "+status);
-        } else {
-            if (sArgs.Equals("ON") || sArgs.Equals("1") || sArgs.Equals("true")) {
-                replayAll = true;
-                SetSetting("replayAll", "1");
-            } else {
-                replayAll = false;
-                SetSetting("replayAll", "0");
-            }
-            CString status = (replayAll ? "On" : "Off");
-            PutModule("ReplayAll is now set to: "+status);
+        if (!sArgs.empty()) {
+            replayAll = sArgs.ToBool();
+            SetSetting("replayAll", replayAll ? "1" : "0");
         }
+
+        CString status = (replayAll ? "On" : "Off");
+        CString sNow = (sArgs.empty() ? "" : "now ");
+        PutModule("ReplayAll is " + sNow + "set to: "+ status);
     }
 
     void LogLimitCommand(const CString &sLine) {
