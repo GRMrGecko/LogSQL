@@ -27,7 +27,81 @@
 
 class CLogSQLite : public CModule {
 public:
-    MODCONSTRUCTOR(CLogSQLite) {}
+    MODCONSTRUCTOR(CLogSQLite) {
+        AddHelpCommand();
+        AddCommand("Replay", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::ReplayCommand),
+            "", "Play back the messages received.");
+        AddCommand("ReplayAll", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::ReplayAllCommand),
+            "[1|0]", "Set LogSQLite to replay all messages stored (default is off).");
+        AddCommand("LogLimit",  static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::LogLimitCommand),
+            "[1|0]", "Set LogSQLite to limit the amount of items to store into the log (0 means to keep everything, 1 means clear after replay, anything else would limit to the count, default is 1).");
+        AddCommand("LogLevel",  static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::LogLevelCommand),
+            "[0-4]", "Set LogSQLite log level (0 messages mentioning you and/or to you only. 1 include all messages sent in an channel. 2 include all actions, join/part, and notices sent in channel and to you. 3 include all server wide messages. 4 include messages sent by you. Default is 1).");
+    }
+
+    void ReplayCommand(const CString &sLine) {
+        Replay();
+        PutModule("Replayed");
+    }
+
+    void ReplayAllCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+
+        if (sArgs.empty()) {
+            CString status = (replayAll ? "On" : "Off");
+            PutModule("ReplayAll is set to: "+status);
+        } else {
+            if (sArgs.Equals("ON") || sArgs.Equals("1") || sArgs.Equals("true")) {
+                replayAll = true;
+                SetSetting("replayAll", "1");
+            } else {
+                replayAll = false;
+                SetSetting("replayAll", "0");
+            }
+            CString status = (replayAll ? "On" : "Off");
+            PutModule("ReplayAll is now set to: "+status);
+        }
+    }
+
+    void LogLimitCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+
+        if (sArgs.empty()) {
+            CString result;
+            char limitStr[20];
+            snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
+            result = limitStr;
+            PutModule("LogLimit is set to: "+result);
+        } else {
+            logLimit = strtoul(sArgs.c_str(), NULL, 10);
+            CString result;
+            char limitStr[20];
+            snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
+            result = limitStr;
+            SetSetting("logLimit", result);
+            PutModule("LogLimit is now set to: "+result);
+        }            
+    }
+
+    void LogLevelCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+
+        if (sArgs.empty()) {
+            CString result;
+            char limitStr[20];
+            snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
+            result = limitStr;
+            PutModule("LogLimit is set to: "+result);
+        } else {
+            logLimit = strtoul(sArgs.c_str(), NULL, 10);
+            CString result;
+            char limitStr[20];
+            snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
+            result = limitStr;
+            SetSetting("logLimit", result);
+            PutModule("LogLimit is now set to: "+result);
+        }
+    }
     
     virtual bool OnLoad(const CString& sArgs, CString& sMessage) {
         connected = true;
@@ -462,74 +536,6 @@ public:
         if (!m_pNetwork->IsUserAttached()) {
             SetSetting("clientDisconnected",GetUNIXTime());
         }
-    }
-    
-    virtual void OnModCommand(const CString& sCmdLine) {
-        CString sCommand = sCmdLine.Token(0);
-        CString sArgs = sCmdLine.Token(1, true);
-        
-        if (sCommand.Equals("HELP")) {
-            PutModule("replay - Play back the messages received.");
-            PutModule("replayAll - Set LogSQLite to replay all messages stored (default is off).");
-            PutModule("logLimit - Set LogSQLite to limit the amount of items to store into the log (0 means to keep everything, 1 means clear after replay, anything else would limit to the count, default is 1).");
-            PutModule("logLevel - Set LogSQLite log level (0 messages mentioning you and/or to you only. 1 include all messages sent in an channel. 2 include all actions, join/part, and notices sent in channel and to you. 3 include all server wide messages. 4 include messages sent by you. Default is 1).");
-            PutModule("-----");
-            PutModule("Layout is as below.");
-            PutModule("Command [arguments]");
-            PutModule("-----");
-            PutModule("If you do not include an argument on items that supports arguments, LogSQLite will return the current setting for the item.");
-        } else if (sCommand.Equals("REPLAY")) {
-            Replay();
-            PutModule("Replayed");
-        } else if (sCommand.Equals("REPLAYALL")) {
-            if (sArgs.empty()) {
-                CString status = (replayAll ? "On" : "Off");
-                PutModule("ReplayAll is set to: "+status);
-            } else {
-                if (sArgs.Equals("ON") || sArgs.Equals("1") || sArgs.Equals("true")) {
-                    replayAll = true;
-                    SetSetting("replayAll", "1");
-                } else {
-                    replayAll = false;
-                    SetSetting("replayAll", "0");
-                }
-                CString status = (replayAll ? "On" : "Off");
-                PutModule("ReplayAll is now set to: "+status);
-            }
-        } else if (sCommand.Equals("LOGLIMIT")) {
-            if (sArgs.empty()) {
-                CString result;
-                char limitStr[20];
-                snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
-                result = limitStr;
-                PutModule("LogLimit is set to: "+result);
-            } else {
-                logLimit = strtoul(sArgs.c_str(), NULL, 10);
-                CString result;
-                char limitStr[20];
-                snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
-                result = limitStr;
-                SetSetting("logLimit", result);
-                PutModule("LogLimit is now set to: "+result);
-            }
-        } else if (sCommand.Equals("LOGLEVEL")) {
-            if (sArgs.empty()) {
-                CString result;
-                char levelStr[20];
-                snprintf(levelStr, sizeof(levelStr), "%d", logLevel);
-                result = levelStr;
-                PutModule("LogLevel is set to: "+result);
-            } else {
-                logLevel = atoi(sArgs.c_str());
-                CString result;
-                char levelStr[20];
-                snprintf(levelStr, sizeof(levelStr), "%d", logLevel);
-                result = levelStr;
-                SetSetting("logLevel", result);
-                PutModule("LogLevel is now set to: "+result);
-            }
-        } else
-            PutModule("Unknown command ["+sCommand+"] for help, type help.");
     }
     
     void Replay() {
