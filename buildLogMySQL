@@ -1,8 +1,12 @@
 #!/bin/bash
 
 INSTALLNAMETOOL=`which install_name_tool` # Fixes Mac OS X issue with linking.
-
 ZNCBUILD=`which znc-buildmod`
+
+if [ -f logMySQL.buildconfig ]; then
+	. ./logMySQL.buildconfig
+fi
+
 if [ "$ZNCBUILD" = "" ]; then
 	echo "Where is znc-buildmod:"
 	read ZNCBUILD
@@ -11,16 +15,28 @@ if [ "$ZNCBUILD" = "" ]; then
 	fi
 fi
 
-echo "Where is MySQL path [/usr/local/mysql]:"
-read MYSQL
 if [ "$MYSQL" = "" ]; then
-	MYSQL="/usr/local/mysql"
+	echo "Where is MySQL path [/usr/local/mysql]:"
+	read MYSQL
+	if [ "$MYSQL" = "" ]; then
+		MYSQL="/usr/local/mysql"
+	fi
 fi
 
-echo "Where is ZNC configuration path [$HOME/.znc]:"
-read ZNCCONFIG
 if [ "$ZNCCONFIG" = "" ]; then
-	ZNCCONFIG="$HOME/.znc"
+	echo "Where is ZNC configuration path [$HOME/.znc]:"
+	read ZNCCONFIG
+	if [ "$ZNCCONFIG" = "" ]; then
+		ZNCCONFIG="$HOME/.znc"
+	fi
+fi
+
+if [ ! -f logMySQL.buildconfig ]; then
+	echo "#!/bin/bash" > logMySQL.buildconfig
+	echo "ZNCBUILD=\"$ZNCBUILD\"" >> logMySQL.buildconfig
+	echo "MYSQL=\"$MYSQL\"" >> logMySQL.buildconfig
+	echo "ZNCCONFIG=\"$ZNCCONFIG\"" >> logMySQL.buildconfig
+	chmod 755 logMySQL.buildconfig
 fi
 
 LDFLAGS="-L $MYSQL/lib -lmysqlclient -I $MYSQL/include" "$ZNCBUILD" logmysql.cpp

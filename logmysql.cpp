@@ -27,7 +27,174 @@
 
 class CLogMySQL : public CModule {
 public:
-    MODCONSTRUCTOR(CLogMySQL) {}
+    MODCONSTRUCTOR(CLogMySQL) {
+        AddHelpCommand();
+        AddCommand("Host", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::HostCommand), "[a-z0-9.]+", "MySQL host.");
+        AddCommand("Port", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::PortCommand), "[0-9]+", "MySQL port.");
+        AddCommand("Username", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::UsernameCommand), "[A-Za-z0-9]+", "MySQL username.");
+        AddCommand("Password", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::PasswordCommand), "[A-Za-z0-9]+", "MySQL password.");
+        AddCommand("DatabaseName", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::DatabaseNameCommand), "[a-z0-9]+", "MySQL database name.");
+        AddCommand("Connect", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::ConnectCommand), "", "Reconnect to the MySQL database.");
+        
+        AddCommand("Replay", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::ReplayCommand), "", "Play back the messages received.");
+        AddCommand("ReplayAll", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::ReplayAllCommand), "[1|0]", "Replay all messages stored.");
+        AddCommand("LogLimit", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::LogLimitCommand), "[0-9]+", "Limit the amount of items to store into the log.");
+        AddCommand("LogLevel", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::LogLevelCommand), "[0-4]", "Log level.");
+    }
+    
+    void HostCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+        bool help = sArgs.Equals("HELP");
+        
+        if (help) {
+            PutModule("The MySQL host. Can be an IP Address or Hostname. 127.0.0.1 or localhost is for the current server.");
+        } else if (!sArgs.empty()) {
+            SetNV("host",sArgs);
+        }
+        CString now = (sArgs.empty() || help ? "" : "now ");
+        PutModule("Host is "+now+"set to: "+GetNV("host"));
+    }
+    
+    void PortCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+        bool help = sArgs.Equals("HELP");
+        
+        if (help) {
+            PutModule("The MySQL port. Usually will be 3306.");
+        } else if (!sArgs.empty()) {
+            CString result;
+            unsigned int port = strtoul(sArgs.c_str(), NULL, 10);
+            char portStr[20];
+            snprintf(portStr, sizeof(portStr), "%u", port);
+            result = portStr;
+            SetNV("port",result);
+        }
+        CString now = (sArgs.empty() || help ? "" : "now ");
+        PutModule("Port is "+now+"set to: "+GetNV("port"));
+    }
+    
+    void UsernameCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+        bool help = sArgs.Equals("HELP");
+        
+        if (help) {
+            PutModule("Your MySQL user username.");
+        } else if (!sArgs.empty()) {
+            SetNV("username",sArgs);
+        }
+        CString now = (sArgs.empty() || help ? "" : "now ");
+        PutModule("Username is "+now+"set to: "+GetNV("username"));
+    }
+    
+    void PasswordCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+        bool help = sArgs.Equals("HELP");
+        
+        if (help) {
+            PutModule("Your MySQL user password.");
+        } else if (!sArgs.empty()) {
+            SetNV("password",sArgs);
+        }
+        CString status = (GetNV("password").empty() ? "blank" : "set");
+        CString now = (sArgs.empty() || help ? "" : "now ");
+        PutModule("Password is "+now+status);
+    }
+    
+    void DatabaseNameCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+        bool help = sArgs.Equals("HELP");
+        
+        if (help) {
+            PutModule("The MySQL database name which contains the messages and settings tables.");
+        } else if (!sArgs.empty()) {
+            SetNV("databaseName",sArgs);
+        }
+        CString now = (sArgs.empty() || help ? "" : "now ");
+        PutModule("Database Name is "+now+"set to: "+GetNV("databaseName"));
+    }
+    
+    void ConnectCommand(const CString &sLine) {
+        MySQLConnect();
+        if (databaseConnected)
+            PutModule("Database is now connected");
+        else
+            PutModule("Unable to connect to database. Check configuration.");
+    }
+    
+    
+    void ReplayCommand(const CString &sLine) {
+        Replay();
+        PutModule("Replayed");
+    }
+    
+    void ReplayAllCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+        bool help = sArgs.Equals("HELP");
+        
+        if (help) {
+            PutModule("On: All logs stored will be replayed.");
+            PutModule("Off: Only logs since the last time you connected will be replayed.");
+        } else if (!sArgs.empty()) {
+            replayAll = sArgs.ToBool();
+            SetSetting("replayAll", (replayAll ? "1" : "0"));
+        }
+        
+        CString status = (replayAll ? "On" : "Off");
+        CString now = (sArgs.empty() || help ? "" : "now ");
+        PutModule("ReplayAll is "+now+"set to: "+status);
+    }
+    
+    void LogLimitCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+        bool help = sArgs.Equals("HELP");
+        
+        CString setting;
+        if (help) {
+            PutModule("0: Everything will be kept in database.");
+            PutModule("1: Everything will be kept in database until replayed.");
+            PutModule("2+: Limit logs stored in database to limit set.");
+        } else if (!sArgs.empty()) {
+            logLimit = strtoul(sArgs.c_str(), NULL, 10);
+            char limitStr[20];
+            snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
+            setting = limitStr;
+            SetSetting("logLimit", setting);
+        }
+        if (setting.empty()) {
+            char limitStr[20];
+            snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
+            setting = limitStr;
+        }
+        CString now = (sArgs.empty() || help ? "" : "now ");
+        PutModule("LogLimit is "+now+"set to: "+setting);
+    }
+    
+    void LogLevelCommand(const CString &sLine) {
+        CString sArgs = sLine.Token(1, true);
+        bool help = sArgs.Equals("HELP");
+        
+        CString setting;
+        if (help) {
+            PutModule("0: Mentions and messages to you.");
+            PutModule("1: All messages.");
+            PutModule("2: Actions, Joins/Parts, and Notices.");
+            PutModule("3: Server wide messages.");
+            PutModule("4: All messages, actions, joins/parts, and noticies sent by you.");
+        } else if (!sArgs.empty()) {
+            logLevel = atoi(sArgs.c_str());
+            char levelStr[20];
+            snprintf(levelStr, sizeof(levelStr), "%d", logLevel);
+            setting = levelStr;
+            SetSetting("logLevel", setting);
+        }
+        if (setting.empty()) {
+            char levelStr[20];
+            snprintf(levelStr, sizeof(levelStr), "%d", logLevel);
+            setting = levelStr;
+        }
+        CString now = (sArgs.empty() || help ? "" : "now ");
+        PutModule("LogLevel is "+now+"set to: "+setting);
+    }
     
     virtual bool OnLoad(const CString& sArgs, CString& sMessage) {
         connected = true;
@@ -631,146 +798,6 @@ public:
         if (!m_pNetwork->IsUserAttached()) {
             SetSetting("clientDisconnected",GetUNIXTime());
         }
-    }
-    
-    virtual void OnModCommand(const CString& sCmdLine) {
-        CString sCommand = sCmdLine.Token(0);
-        CString sArgs = sCmdLine.Token(1, true);
-        
-        if (sCommand.Equals("HELP")) {
-            CString host = GetNV("host");
-            CString port = GetNV("port");
-            if (port.empty()) {
-                port = "3306";
-                SetNV("port",port);
-            }
-            CString username = GetNV("username");
-            CString password = GetNV("password");
-            CString databaseName = GetNV("databaseName");
-            
-            PutModule("host - MySQL host.");
-            PutModule("port - MySQL port (defualt is 3306).");
-            PutModule("username - MySQL username.");
-            PutModule("password - MySQL password.");
-            PutModule("databaseName - MySQL database name.");
-            PutModule("-----");
-            PutModule("connect - Reconnect to the MySQL database.");
-            PutModule("-----");
-            PutModule("replay - Play back the messages received.");
-            PutModule("replayAll - Set LogMySQL to replay all messages stored (default is off).");
-            PutModule("logLimit - Set LogMySQL to limit the amount of items to store into the log (0 means to keep everything, 1 means clear after replay, anything else would limit to the count, default is 1).");
-            PutModule("logLevel - Set LogMySQL log level (0 messages mentioning you and/or to you only. 1 include all messages sent in an channel. 2 include all actions, join/part, and notices sent in channel and to you. 3 include all server wide messages. 4 include messages sent by you. Default is 1).");
-            PutModule("-----");
-            PutModule("Layout is as below.");
-            PutModule("Command [arguments]");
-            PutModule("-----");
-            PutModule("If you do not include an argument on items that supports arguments, LogMySQL will return the current setting for the item.");
-        } else if (sCommand.Equals("HOST")) {
-            if (sArgs.empty()) {
-                CString host = GetNV("host");
-                PutModule("Host is set to: "+host);
-            } else {
-                SetNV("host",sArgs);
-                PutModule("Host is now set to: "+sArgs);
-            }
-        } else if (sCommand.Equals("PORT")) {
-            if (sArgs.empty()) {
-                CString port = GetNV("port");
-                PutModule("Port is set to: "+port);
-            } else {
-                CString result;
-                unsigned int port = strtoul(sArgs.c_str(), NULL, 10);
-                char portStr[20];
-                snprintf(portStr, sizeof(portStr), "%u", port);
-                result = portStr;
-                SetNV("port",result);
-                PutModule("Port is now set to: "+result);
-            }
-        } else if (sCommand.Equals("USERNAME")) {
-            if (sArgs.empty()) {
-                CString username = GetNV("username");
-                PutModule("Username is set to: "+username);
-            } else {
-                SetNV("username",sArgs);
-                PutModule("Username is now set to: "+sArgs);
-            }
-        } else if (sCommand.Equals("PASSWORD")) {
-            if (sArgs.empty()) {
-                CString password = GetNV("password");
-                if (password.empty())
-                    PutModule("Password is blank.");
-                else
-                    PutModule("Password is set.");
-            } else {
-                SetNV("password",sArgs);
-                PutModule("Password is now set.");
-            }
-        } else if (sCommand.Equals("DATABASENAME")) {
-            if (sArgs.empty()) {
-                CString databaseName = GetNV("databaseName");
-                PutModule("Database Name is set to: "+databaseName);
-            } else {
-                SetNV("databaseName",sArgs);
-                PutModule("Database Name is now set to: "+sArgs);
-            }
-        } else if (sCommand.Equals("CONNECT")) {
-            MySQLConnect();
-            if (databaseConnected)
-                PutModule("Database is now connected");
-            else
-                PutModule("Unable to connect to database. Check configuration.");
-        } else if (sCommand.Equals("REPLAY")) {
-            Replay();
-            PutModule("Replayed");
-        } else if (sCommand.Equals("REPLAYALL")) {
-            if (sArgs.empty()) {
-                CString status = (replayAll ? "On" : "Off");
-                PutModule("ReplayAll is set to: "+status);
-            } else {
-                if (sArgs.Equals("ON") || sArgs.Equals("1") || sArgs.Equals("true")) {
-                    replayAll = true;
-                    SetSetting("replayAll", "1");
-                } else {
-                    replayAll = false;
-                    SetSetting("replayAll", "0");
-                }
-                CString status = (replayAll ? "On" : "Off");
-                PutModule("ReplayAll is now set to: "+status);
-            }
-        } else if (sCommand.Equals("LOGLIMIT")) {
-            if (sArgs.empty()) {
-                CString result;
-                char limitStr[20];
-                snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
-                result = limitStr;
-                PutModule("LogLimit is set to: "+result);
-            } else {
-                logLimit = strtoul(sArgs.c_str(), NULL, 10);
-                CString result;
-                char limitStr[20];
-                snprintf(limitStr, sizeof(limitStr), "%lu", logLimit);
-                result = limitStr;
-                SetSetting("logLimit", result);
-                PutModule("LogLimit is now set to: "+result);
-            }
-        } else if (sCommand.Equals("LOGLEVEL")) {
-            if (sArgs.empty()) {
-                CString result;
-                char levelStr[20];
-                snprintf(levelStr, sizeof(levelStr), "%d", logLevel);
-                result = levelStr;
-                PutModule("LogLevel is set to: "+result);
-            } else {
-                logLevel = atoi(sArgs.c_str());
-                CString result;
-                char levelStr[20];
-                snprintf(levelStr, sizeof(levelStr), "%d", logLevel);
-                result = levelStr;
-                SetSetting("logLevel", result);
-                PutModule("LogLevel is now set to: "+result);
-            }
-        } else
-            PutModule("Unknown command ["+sCommand+"] for help, type help.");
     }
     
     void Replay() {
