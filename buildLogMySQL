@@ -1,7 +1,8 @@
 #!/bin/bash
 
-INSTALLNAMETOOL=`which install_name_tool` # Fixes Mac OS X issue with linking.
-ZNCBUILD=`which znc-buildmod`
+INSTALLNAMETOOL=`which install_name_tool 2>> /dev/null` # Fixes Mac OS X issue with linking.
+ZNCBUILD=`which znc-buildmod 2>> /dev/null`
+MYSQLCONFIG=`which mysql_config 2>> /dev/null`
 
 if [ -f logMySQL.buildconfig ]; then
 	. ./logMySQL.buildconfig
@@ -15,11 +16,11 @@ if [ "$ZNCBUILD" = "" ]; then
 	fi
 fi
 
-if [ "$MYSQL" = "" ]; then
-	echo "Where is MySQL path [/usr/local/mysql]:"
-	read MYSQL
-	if [ "$MYSQL" = "" ]; then
-		MYSQL="/usr/local/mysql"
+if [ "$MYSQLCONFIG" = "" ]; then
+	echo "Where is MySQL_Config path [/usr/local/mysql/bin/mysql_config]:"
+	read MYSQLCONFIG
+	if [ "$MYSQLCONFIG" = "" ]; then
+		MYSQLCONFIG="/usr/local/mysql/bin/mysql_config"
 	fi
 fi
 
@@ -34,13 +35,17 @@ fi
 if [ ! -f logMySQL.buildconfig ]; then
 	echo "#!/bin/bash" > logMySQL.buildconfig
 	echo "ZNCBUILD=\"$ZNCBUILD\"" >> logMySQL.buildconfig
-	echo "MYSQL=\"$MYSQL\"" >> logMySQL.buildconfig
+	echo "MYSQLCONFIG=\"$MYSQLCONFIG\"" >> logMySQL.buildconfig
 	echo "ZNCCONFIG=\"$ZNCCONFIG\"" >> logMySQL.buildconfig
 	chmod 755 logMySQL.buildconfig
 fi
 
-LDFLAGS="-L $MYSQL/lib -lmysqlclient -I $MYSQL/include" "$ZNCBUILD" logmysql.cpp
+MYSQLINCLUDE=`$MYSQLCONFIG --include`
+MYSQLLIBS=`$MYSQLCONFIG --libs`
+
+LDFLAGS="$MYSQLLIBS $MYSQLINCLUDE" "$ZNCBUILD" logmysql.cpp
 if [ "$INSTALLNAMETOOL" != "" ]; then
+	MYSQL=`$MYSQLCONFIG --libs | sed -e "s/.*-L//;s/ .*//"`
 	"$INSTALLNAMETOOL" -change libmysqlclient.18.dylib "$MYSQL/libmysqlclient.dylib" logmysql.so
 fi
 cp logmysql.so "$ZNCCONFIG/modules/logmysql.so"
