@@ -31,4 +31,15 @@ BEGIN;
 INSERT INTO `settings` VALUES ('replayAll', '0'), ('logLimit', '1'), ('logLevel', '1');
 COMMIT;
 
+-- ----------------------------
+--  Table structure for `ignorelist`
+-- ----------------------------
+DROP TABLE IF EXISTS `ignorelist`;
+CREATE TABLE `ignorelist` (
+  `rowid` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `type` text,
+  `target` text,
+  PRIMARY KEY (`rowid`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
 SET FOREIGN_KEY_CHECKS = 1;

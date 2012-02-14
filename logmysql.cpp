@@ -40,6 +40,9 @@ public:
         AddCommand("ReplayAll", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::ReplayAllCommand), "[1|0]", "Replay all messages stored.");
         AddCommand("LogLimit", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::LogLimitCommand), "[0-9]+", "Limit the amount of items to store into the log.");
         AddCommand("LogLevel", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::LogLevelCommand), "[0-4]", "Log level.");
+        AddCommand("AddIgnore", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::AddIgnoreCommand), "Type[nick|chan] Target", "Add to ignore list.");
+        AddCommand("RemoveIgnore", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::RemoveIgnoreCommand), "Type[nick|chan] Target", "Remove from ignore list.");
+        AddCommand("IgnoreList", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::IgnoreListCommand), "", "View what is currently ignored.");
     }
     
     void HostCommand(const CString &sLine) {
@@ -196,6 +199,88 @@ public:
         PutModule("LogLevel is "+now+"set to: "+setting);
     }
     
+    void AddIgnoreCommand(const CString &sLine) {
+        CString type = sLine.Token(1);
+        CString target = sLine.Token(2);
+        bool help = sLine.Equals("HELP");
+        
+        if (help) {
+            PutModule("Inorder to add an ignore, you must choose what type of ignore it is which can ether be a nick or a chan.");
+            PutModule("Nicks are matched with wildcards against the full mask.");
+            PutModule("Channels are matched by #channel which can contain wildcards.");
+        } else if (!type.empty() && !target.empty()) {
+            if (type.Equals("nick"))
+                type = "nick";
+            else if (type.Equals("chan") || type.Equals("channel"))
+                type = "chan";
+            else
+                type = "";
+            
+            if (type.empty()) {
+                PutModule("Unknown type. If you need help, type \"AddIgnore help\".");
+                return;
+            }
+            
+            if (AddIgnore(type, target))
+                PutModule("Successfully added \""+target+"\" to the ignore list.");
+            else
+                PutModule("Failed, maybe it already existed?");
+        } else {
+            PutModule("If you need help, type \"AddIgnore help\".");
+        }
+    }
+    
+    void RemoveIgnoreCommand(const CString &sLine) {
+        CString type = sLine.Token(1);
+        CString target = sLine.Token(2);
+        bool help = sLine.Equals("HELP");
+        
+        if (help) {
+            PutModule("Inorder to remove an ignore, you must specify the type and the exact pattren used to add it. If you need to find what currently exists, type \"IgnoreList\".");
+        } else if (!type.empty() && !target.empty()) {
+            if (type.Equals("nick"))
+                type = "nick";
+            else if (type.Equals("chan") || type.Equals("channel"))
+                type = "chan";
+            else
+                type = "";
+            
+            if (type.empty()) {
+                PutModule("Unknown type. If you need help, type \"RemoveIgnore help\".");
+                return;
+            }
+            
+            if (RemoveIgnore(type, target))
+                PutModule("Successfully removed \""+target+"\" from the ignore list.");
+            else
+                PutModule("Failed, maybe it does not exist?");
+        } else {
+            PutModule("If you need help, type \"RemoveIgnore help\".");
+        }
+    }
+    
+    void IgnoreListCommand(const CString &sLine) {
+        if (nickIgnoreList.size()==0) {
+            PutModule("The nick ignore list is currently empty.");
+        } else {
+            PutModule("Nick ignore list contains:");
+            
+            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+                PutModule(*it);
+            }
+        }
+        PutModule("---");
+        if (chanIgnoreList.size()==0) {
+            PutModule("The channel ignore list is currently empty.");
+        } else {
+            PutModule("Channel ignore list contains:");
+            
+            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+                PutModule(*it);
+            }
+        }
+    }
+    
     virtual bool OnLoad(const CString& sArgs, CString& sMessage) {
         connected = true;
         databaseConnected = false;
@@ -237,45 +322,51 @@ public:
                     cout << "LogMySQL: Database connected.\n";
                     
                     MYSQL_RES *settings = mysql_list_tables(database, "settings");
-                    MYSQL_RES *messages = mysql_list_tables(database, "messages");
-                    if (mysql_num_rows(settings)==0 || mysql_num_rows(messages)==0) {
-                        cout << "Creating tables\n";
+                    if (mysql_num_rows(settings)==0) {
                         MYSQL_STMT *statement = mysql_stmt_init(database);
-                        int status = mysql_stmt_prepare(statement, "DROP TABLE IF EXISTS `settings`", 31);
+                        int status = mysql_stmt_prepare(statement, "CREATE TABLE `settings` (`name` text,`value` text)", 50);
                         if (status==0) {
                             mysql_stmt_execute(statement);
                             mysql_stmt_close(statement);
+                            
+                            SetSetting("replayAll","0");
+                            SetSetting("logLimit","1");
+                            SetSetting("logLevel","1");
+                            SetSetting("version","1");
                         }
-                        statement = mysql_stmt_init(database);
-                        status = mysql_stmt_prepare(statement, "CREATE TABLE `settings` (`name` text,`value` text)", 50);
-                        if (status==0) {
-                            mysql_stmt_execute(statement);
-                            mysql_stmt_close(statement);
-                        }
-                        statement = mysql_stmt_init(database);
-                        status = mysql_stmt_prepare(statement, "DROP TABLE IF EXISTS `messages`", 31);
-                        if (status==0) {
-                            mysql_stmt_execute(statement);
-                            mysql_stmt_close(statement);
-                        }
-                        statement = mysql_stmt_init(database);
-                        status = mysql_stmt_prepare(statement, "CREATE TABLE `messages` (`rowid` int UNSIGNED AUTO_INCREMENT,`target` text,`nick` text,`type` text,`message` longblob,`time` decimal(20,5) UNSIGNED,PRIMARY KEY (`rowid`))", 170);
-                        if (status==0) {
-                            mysql_stmt_execute(statement);
-                            mysql_stmt_close(statement);
-                        }
-                        SetSetting("replayAll","0");
-                        SetSetting("logLimit","1");
-                        SetSetting("logLevel","1");
                     }
                     if (settings!=NULL)
                         mysql_free_result(settings);
+                    MYSQL_RES *messages = mysql_list_tables(database, "messages");
+                    if (mysql_num_rows(messages)==0) {
+                        MYSQL_STMT *statement = mysql_stmt_init(database);
+                        int status = mysql_stmt_prepare(statement, "CREATE TABLE `messages` (`rowid` int UNSIGNED AUTO_INCREMENT,`target` text,`nick` text,`type` text,`message` longblob,`time` decimal(20,5) UNSIGNED,PRIMARY KEY (`rowid`))", 170);
+                        if (status==0) {
+                            mysql_stmt_execute(statement);
+                            mysql_stmt_close(statement);
+                        }
+                    }
                     if (messages!=NULL)
                         mysql_free_result(messages);
+                    MYSQL_RES *ignorelist = mysql_list_tables(database, "ignorelist");
+                    if (mysql_num_rows(ignorelist)==0) {
+                        MYSQL_STMT *statement = mysql_stmt_init(database);
+                        int status = mysql_stmt_prepare(statement, "CREATE TABLE `ignorelist` (`rowid` int UNSIGNED AUTO_INCREMENT,`type` text,`target` text,PRIMARY KEY (`rowid`))", 111);
+                        if (status==0) {
+                            mysql_stmt_execute(statement);
+                            mysql_stmt_close(statement);
+                        }
+                    }
+                    if (ignorelist!=NULL)
+                        mysql_free_result(ignorelist);
                     
                     replayAll = atoi(GetSetting("replayAll").c_str());
                     logLimit = strtoul(GetSetting("logLimit").c_str(), NULL, 10);
                     logLevel = atoi(GetSetting("logLevel").c_str());
+                    
+                    unsigned long version = strtoul(GetSetting("version").c_str(), NULL, 10);
+                    if (version==0)
+                        SetSetting("version","1");
                 } else {
                     cout << "LogMySQL: Database unable to connect.\n";
                 }
@@ -294,6 +385,8 @@ public:
     
     void AddMessage(const CString& target, const CString& nick, const CString& type, const CString& message) {
         if (!databaseConnected)
+            return;
+        if (IsIgnored("nick",nick) || (target.Left(1).Equals("#") && IsIgnored("chan",target)))
             return;
         MYSQL_STMT *statement = mysql_stmt_init(database);
         int status = mysql_stmt_prepare(statement, "INSERT INTO `messages` (`target`, `nick`, `type`, `message`, `time`) VALUES (?,?,?,?,?)", 87);
@@ -611,8 +704,186 @@ public:
         mysql_stmt_close(statement);
         return stringValue;
     }
-    //Server stuff
     
+    void UpdateIgnoreLists() {
+        if (!databaseConnected)
+            return;
+        nickIgnoreList.clear();
+        MYSQL_STMT *statement = mysql_stmt_init(database);
+        int status = mysql_stmt_prepare(statement, "SELECT `target` FROM `ignorelist` WHERE `type`='nick'", 53);
+        if (status==0) {
+            status = mysql_stmt_execute(statement);
+            if (status==0) {
+                MYSQL_RES *result = mysql_stmt_result_metadata(statement);
+                unsigned int dataCount = mysql_num_fields(result);
+                if (dataCount==1) {
+                    MYSQL_FIELD *fields = mysql_fetch_fields(result);
+                    
+                    unsigned long length;
+                    char targetData[fields[0].length];
+                    MYSQL_BIND results[1];
+                    memset(results, 0, sizeof(results));
+                    results[0].buffer_type = MYSQL_TYPE_STRING;
+                    results[0].buffer = (void *)targetData;
+                    results[0].buffer_length = fields[0].length;
+                    results[0].length = &length;
+                    
+                    status = mysql_stmt_bind_result(statement, results);
+                    if (status==0) {
+                        while (true) {
+                            status = mysql_stmt_fetch(statement);
+                            if (status!=0)
+                                break;
+                            
+                            CString ignore = CString(targetData, length);
+                            nickIgnoreList.push_back(ignore);
+                            break;
+                        }
+                    }
+                }
+                mysql_free_result(result);
+            }
+            mysql_stmt_close(statement);
+        }
+        chanIgnoreList.clear();
+        statement = mysql_stmt_init(database);
+        status = mysql_stmt_prepare(statement, "SELECT `target` FROM `ignorelist` WHERE `type`='chan'", 53);
+        if (status==0) {
+            status = mysql_stmt_execute(statement);
+            if (status==0) {
+                MYSQL_RES *result = mysql_stmt_result_metadata(statement);
+                unsigned int dataCount = mysql_num_fields(result);
+                if (dataCount==1) {
+                    MYSQL_FIELD *fields = mysql_fetch_fields(result);
+                    
+                    unsigned long length;
+                    char targetData[fields[0].length];
+                    MYSQL_BIND results[1];
+                    memset(results, 0, sizeof(results));
+                    results[0].buffer_type = MYSQL_TYPE_STRING;
+                    results[0].buffer = (void *)targetData;
+                    results[0].buffer_length = fields[0].length;
+                    results[0].length = &length;
+                    
+                    status = mysql_stmt_bind_result(statement, results);
+                    if (status==0) {
+                        while (true) {
+                            status = mysql_stmt_fetch(statement);
+                            if (status!=0)
+                                break;
+                            
+                            CString ignore = CString(targetData, length);
+                            chanIgnoreList.push_back(ignore);
+                            break;
+                        }
+                    }
+                }
+                mysql_free_result(result);
+            }
+            mysql_stmt_close(statement);
+        }
+    }
+    bool AddIgnore(const CString& type, const CString& target) {
+        if (!IgnoreExists(type, target)) {
+            MYSQL_STMT *statement = mysql_stmt_init(database);
+            int status = mysql_stmt_prepare(statement, "INSERT INTO `ignorelist` (`type`, `target`) VALUES (?,?)", 56);
+            if (status!=0)
+                return false;
+            
+            MYSQL_BIND bind[2];
+            memset(bind, 0, sizeof(bind));
+            
+            bind[0].buffer_type = MYSQL_TYPE_STRING;
+            bind[0].buffer = (void*)type.c_str();
+            bind[0].buffer_length = type.length();
+            bind[0].is_null = false;
+            
+            bind[1].buffer_type = MYSQL_TYPE_STRING;
+            bind[1].buffer = (void*)target.c_str();
+            bind[1].buffer_length = target.length();
+            bind[1].is_null = false;
+            
+            status = mysql_stmt_bind_param(statement, bind);
+            if (status!=0) {
+                mysql_stmt_close(statement);
+                return false;
+            }
+            
+            mysql_stmt_execute(statement);
+            mysql_stmt_close(statement);
+            
+            if (type.Equals("nick"))
+                nickIgnoreList.push_back(target);
+            else if (type.Equals("chan"))
+                chanIgnoreList.push_back(target);
+            return true;
+        }
+        return false;
+    }
+    bool RemoveIgnore(const CString& type, const CString& target) {
+        if (IgnoreExists(type, target)) {
+            MYSQL_STMT *statement = mysql_stmt_init(database);
+            int status = mysql_stmt_prepare(statement, "DELETE FROM `ignorelist` WHERE `type`=? AND `target`=?", 54);
+            if (status!=0)
+                return false;
+            
+            MYSQL_BIND bind[2];
+            memset(bind, 0, sizeof(bind));
+            
+            bind[0].buffer_type = MYSQL_TYPE_STRING;
+            bind[0].buffer = (void*)type.c_str();
+            bind[0].buffer_length = type.length();
+            bind[0].is_null = false;
+            
+            bind[1].buffer_type = MYSQL_TYPE_STRING;
+            bind[1].buffer = (void*)target.c_str();
+            bind[1].buffer_length = target.length();
+            bind[1].is_null = false;
+            
+            status = mysql_stmt_bind_param(statement, bind);
+            if (status!=0) {
+                mysql_stmt_close(statement);
+                return false;
+            }
+            
+            mysql_stmt_execute(statement);
+            mysql_stmt_close(statement);
+            
+            UpdateIgnoreLists();
+            return true;
+        }
+        return false;
+    }
+    bool IgnoreExists(const CString& type, const CString& target) {
+        if (type.Equals("nick")) {
+            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+                if (target.Equals(*it))
+                    return true;
+            }
+        } else if (type.Equals("chan")) {
+            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+                if (target.Equals(*it))
+                    return true;
+            }
+        }
+        return false;
+    }
+    bool IsIgnored(const CString& type, const CString& target) {
+        if (type.Equals("nick")) {
+            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+                if (target.WildCmp(*it))
+                    return true;
+            }
+        } else if (type.Equals("chan")) {
+            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+                if (target.WildCmp(*it))
+                    return true;
+            }
+        }
+        return false;
+    }
+    
+    //Server stuff
     virtual void OnIRCDisconnected() {
         if (connected) {
             connected = false;
@@ -955,6 +1226,9 @@ private:
     bool replayAll;
     unsigned long logLimit;
     int logLevel;
+    
+    vector<CString> nickIgnoreList;
+    vector<CString> chanIgnoreList;
 };
 
 template<> void TModInfo<CLogMySQL>(CModInfo& Info) {

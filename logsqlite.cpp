@@ -33,6 +33,9 @@ public:
         AddCommand("ReplayAll", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::ReplayAllCommand), "[1|0]", "Replay all messages stored.");
         AddCommand("LogLimit", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::LogLimitCommand), "[0-9]+", "Limit the amount of items to store into the log.");
         AddCommand("LogLevel", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::LogLevelCommand), "[0-4]", "Log level.");
+        AddCommand("AddIgnore", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::AddIgnoreCommand), "Type[nick|chan] Target", "Add to ignore list.");
+        AddCommand("RemoveIgnore", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::RemoveIgnoreCommand), "Type[nick|chan] Target", "Remove from ignore list.");
+        AddCommand("IgnoreList", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::IgnoreListCommand), "", "View what is currently ignored.");
     }
     
     void ReplayCommand(const CString &sLine) {
@@ -109,40 +112,156 @@ public:
         PutModule("LogLevel is "+now+"set to: "+setting);
     }
     
+    void AddIgnoreCommand(const CString &sLine) {
+        CString type = sLine.Token(1);
+        CString target = sLine.Token(2);
+        bool help = sLine.Equals("HELP");
+        
+        if (help) {
+            PutModule("Inorder to add an ignore, you must choose what type of ignore it is which can ether be a nick or a chan.");
+            PutModule("Nicks are matched with wildcards against the full mask.");
+            PutModule("Channels are matched by #channel which can contain wildcards.");
+        } else if (!type.empty() && !target.empty()) {
+            if (type.Equals("nick"))
+                type = "nick";
+            else if (type.Equals("chan") || type.Equals("channel"))
+                type = "chan";
+            else
+                type = "";
+            
+            if (type.empty()) {
+                PutModule("Unknown type. If you need help, type \"AddIgnore help\".");
+                return;
+            }
+            
+            if (AddIgnore(type, target))
+                PutModule("Successfully added \""+target+"\" to the ignore list.");
+            else
+                PutModule("Failed, maybe it already existed?");
+        } else {
+            PutModule("If you need help, type \"AddIgnore help\".");
+        }
+    }
+    
+    void RemoveIgnoreCommand(const CString &sLine) {
+        CString type = sLine.Token(1);
+        CString target = sLine.Token(2);
+        bool help = sLine.Equals("HELP");
+        
+        if (help) {
+            PutModule("Inorder to remove an ignore, you must specify the type and the exact pattren used to add it. If you need to find what currently exists, type \"IgnoreList\".");
+        } else if (!type.empty() && !target.empty()) {
+            if (type.Equals("nick"))
+                type = "nick";
+            else if (type.Equals("chan") || type.Equals("channel"))
+                type = "chan";
+            else
+                type = "";
+            
+            if (type.empty()) {
+                PutModule("Unknown type. If you need help, type \"RemoveIgnore help\".");
+                return;
+            }
+            
+            if (RemoveIgnore(type, target))
+                PutModule("Successfully removed \""+target+"\" from the ignore list.");
+            else
+                PutModule("Failed, maybe it does not exist?");
+        } else {
+            PutModule("If you need help, type \"RemoveIgnore help\".");
+        }
+    }
+    
+    void IgnoreListCommand(const CString &sLine) {
+        if (nickIgnoreList.size()==0) {
+            PutModule("The nick ignore list is currently empty.");
+        } else {
+            PutModule("Nick ignore list contains:");
+            
+            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+                PutModule(*it);
+            }
+        }
+        PutModule("---");
+        if (chanIgnoreList.size()==0) {
+            PutModule("The channel ignore list is currently empty.");
+        } else {
+            PutModule("Channel ignore list contains:");
+            
+            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+                PutModule(*it);
+            }
+        }
+    }
+    
     virtual bool OnLoad(const CString& sArgs, CString& sMessage) {
         connected = true;
         
         CString savePath = GetSavePath();
         savePath += "/log.sqlite";
         
-        bool found = false;
-        FILE *fp = fopen(savePath.c_str(), "rb");
-        if (fp!=NULL) {
-            found = true;
-            fclose(fp);
-        }
-        
         sqlite3_open(savePath.c_str(), &database);
         
-        if (!found) {
-            sqlite3_stmt *result;
-            int status = sqlite3_prepare(database, "CREATE TABLE `settings` (`name` text, `value` text)", -1, &result, NULL);
-            if (status==SQLITE_OK) {
-                sqlite3_step(result);
-                sqlite3_finalize(result);
+        sqlite3_stmt *result;
+        int status = sqlite3_prepare(database, "SELECT `name` FROM `sqlite_master` WHERE `name`='settings'", -1, &result, NULL);
+        if (status==SQLITE_OK) {
+            status = SQLITE_BUSY;
+            while (status==SQLITE_BUSY) {
+                status = sqlite3_step(result);
             }
-            status = sqlite3_prepare(database, "CREATE TABLE `messages` (`target` text, `nick` text, `type` text, `message` text, `time` real(20,5))", -1, &result, NULL);
-            if (status==SQLITE_OK) {
-                sqlite3_step(result);
-                sqlite3_finalize(result);
+            sqlite3_finalize(result);
+            if (status!=SQLITE_ROW) {
+                status = sqlite3_prepare(database, "CREATE TABLE `settings` (`name` text, `value` text)", -1, &result, NULL);
+                if (status==SQLITE_OK) {
+                    sqlite3_step(result);
+                    sqlite3_finalize(result);
+                    
+                    SetSetting("replayAll","0");
+                    SetSetting("logLimit","1");
+                    SetSetting("logLevel","1");
+                    SetSetting("version","1");
+                }
             }
-            SetSetting("replayAll","0");
-            SetSetting("logLimit","1");
-            SetSetting("logLevel","1");
+        }
+        status = sqlite3_prepare(database, "SELECT `name` FROM `sqlite_master` WHERE `name`='messages'", -1, &result, NULL);
+        if (status==SQLITE_OK) {
+            status = SQLITE_BUSY;
+            while (status==SQLITE_BUSY) {
+                status = sqlite3_step(result);
+            }
+            sqlite3_finalize(result);
+            if (status!=SQLITE_ROW) {
+                status = sqlite3_prepare(database, "CREATE TABLE `messages` (`target` text, `nick` text, `type` text, `message` text, `time` real(20,5))", -1, &result, NULL);
+                if (status==SQLITE_OK) {
+                    sqlite3_step(result);
+                    sqlite3_finalize(result);
+                }
+            }
+        }
+        status = sqlite3_prepare(database, "SELECT `name` FROM `sqlite_master` WHERE `name`='ignorelist'", -1, &result, NULL);
+        if (status==SQLITE_OK) {
+            status = SQLITE_BUSY;
+            while (status==SQLITE_BUSY) {
+                status = sqlite3_step(result);
+            }
+            sqlite3_finalize(result);
+            if (status!=SQLITE_ROW) {
+                status = sqlite3_prepare(database, "CREATE TABLE `ignorelist` (`type` text, `target` text)", -1, &result, NULL);
+                if (status==SQLITE_OK) {
+                    sqlite3_step(result);
+                    sqlite3_finalize(result);
+                }
+            }
         }
         replayAll = atoi(GetSetting("replayAll").c_str());
         logLimit = strtoul(GetSetting("logLimit").c_str(), NULL, 10);
         logLevel = atoi(GetSetting("logLevel").c_str());
+        
+        unsigned long version = strtoul(GetSetting("version").c_str(), NULL, 10);
+        if (version==0)
+            SetSetting("version","1");
+        
+        UpdateIgnoreLists();
         
         return true;
     }
@@ -170,6 +289,8 @@ public:
     }
     
     void AddMessage(const CString& target, const CString& nick, const CString& type, const CString& message) {
+        if (IsIgnored("nick",nick) || (target.Left(1).Equals("#") && IsIgnored("chan",target)))
+            return;
         sqlite3_stmt *result;
         int status = sqlite3_prepare(database, "INSERT INTO `messages` (`target`, `nick`, `type`, `message`, `time`) VALUES (?,?,?,?,?)", -1, &result, NULL);
         if (status!=SQLITE_OK)
@@ -355,8 +476,132 @@ public:
         sqlite3_finalize(result);
         return stringValue;
     }
-    //Server stuff
     
+    
+    void UpdateIgnoreLists() {
+        nickIgnoreList.clear();
+        sqlite3_stmt *result;
+        int status = sqlite3_prepare(database, "SELECT `target` FROM `ignorelist` WHERE `type`='nick'", -1, &result, NULL);
+        if (status==SQLITE_OK) {
+            while (true) {
+                status = SQLITE_BUSY;
+                while (status==SQLITE_BUSY) {
+                    status = sqlite3_step(result);
+                }
+                if (status!=SQLITE_ROW)
+                    break;
+                
+                int dataCount = sqlite3_data_count(result);
+                if (dataCount!=1)
+                    break;
+                
+                CString ignore = CString((const char *)sqlite3_column_text(result, 0));
+                nickIgnoreList.push_back(ignore);
+            }
+            sqlite3_finalize(result);
+        }
+        chanIgnoreList.clear();
+        status = sqlite3_prepare(database, "SELECT `target` FROM `ignorelist` WHERE `type`='chan'", -1, &result, NULL);
+        if (status==SQLITE_OK) {
+            while (true) {
+                status = SQLITE_BUSY;
+                while (status==SQLITE_BUSY) {
+                    status = sqlite3_step(result);
+                }
+                if (status!=SQLITE_ROW)
+                    break;
+                
+                int dataCount = sqlite3_data_count(result);
+                if (dataCount!=1)
+                    break;
+                
+                CString ignore = CString((const char *)sqlite3_column_text(result, 0));
+                chanIgnoreList.push_back(ignore);
+            }
+            sqlite3_finalize(result);
+        }
+    }
+    bool AddIgnore(const CString& type, const CString& target) {
+        if (!IgnoreExists(type, target)) {
+            sqlite3_stmt *result;
+            int status = sqlite3_prepare(database, "INSERT INTO `ignorelist` (`type`, `target`) VALUES (?,?)", -1, &result, NULL);
+            if (status!=SQLITE_OK)
+                return false;
+            status = sqlite3_bind_text(result, 1, type.c_str(), type.length(), SQLITE_STATIC);
+            if (status!=SQLITE_OK) {
+                sqlite3_finalize(result);
+                return false;
+            }
+            status = sqlite3_bind_text(result, 2, target.c_str(), target.length(), SQLITE_STATIC);
+            if (status!=SQLITE_OK) {
+                sqlite3_finalize(result);
+                return false;
+            }
+            sqlite3_step(result);
+            sqlite3_finalize(result);
+            
+            if (type.Equals("nick"))
+                nickIgnoreList.push_back(target);
+            else if (type.Equals("chan"))
+                chanIgnoreList.push_back(target);
+            return true;
+        }
+        return false;
+    }
+    bool RemoveIgnore(const CString& type, const CString& target) {
+        if (IgnoreExists(type, target)) {
+            sqlite3_stmt *result;
+            int status = sqlite3_prepare(database, "DELETE FROM `ignorelist` WHERE `type`=? AND `target`=?", -1, &result, NULL);
+            if (status!=SQLITE_OK)
+                return false;
+            status = sqlite3_bind_text(result, 1, type.c_str(), type.length(), SQLITE_STATIC);
+            if (status!=SQLITE_OK) {
+                sqlite3_finalize(result);
+                return false;
+            }
+            status = sqlite3_bind_text(result, 2, target.c_str(), target.length(), SQLITE_STATIC);
+            if (status!=SQLITE_OK) {
+                sqlite3_finalize(result);
+                return false;
+            }
+            sqlite3_step(result);
+            sqlite3_finalize(result);
+            
+            UpdateIgnoreLists();
+            return true;
+        }
+        return false;
+    }
+    bool IgnoreExists(const CString& type, const CString& target) {
+        if (type.Equals("nick")) {
+            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+                if (target.Equals(*it))
+                    return true;
+            }
+        } else if (type.Equals("chan")) {
+            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+                if (target.Equals(*it))
+                    return true;
+            }
+        }
+        return false;
+    }
+    bool IsIgnored(const CString& type, const CString& target) {
+        if (type.Equals("nick")) {
+            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+                if (target.WildCmp(*it))
+                    return true;
+            }
+        } else if (type.Equals("chan")) {
+            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+                if (target.WildCmp(*it))
+                    return true;
+            }
+        }
+        return false;
+    }
+    
+    //Server stuff
     virtual void OnIRCDisconnected() {
         if (connected) {
             connected = false;
@@ -647,6 +892,9 @@ private:
     bool replayAll;
     unsigned long logLimit;
     int logLevel;
+    
+    vector<CString> nickIgnoreList;
+    vector<CString> chanIgnoreList;
 };
 
 template<> void TModInfo<CLogSQLite>(CModInfo& Info) {
