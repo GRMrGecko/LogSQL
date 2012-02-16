@@ -19,6 +19,7 @@
 
 #include <znc/Chan.h>
 #include <znc/User.h>
+#include <znc/Client.h>
 #include <znc/IRCNetwork.h>
 #include <znc/Modules.h>
 #include <time.h>
@@ -822,6 +823,7 @@ public:
             columns[i] = CString(sqlite3_column_name(result, i));
         }
         
+        time_t now = time(NULL);
         while (true) {
             status = SQLITE_BUSY;
             while (status==SQLITE_BUSY) {
@@ -836,40 +838,52 @@ public:
                 data[columns[i]] = CString((const char *)sqlite3_column_text(result, i));
             }
             
-            time_t now = time(NULL);
             time_t unixTime = (time_t)strtol(data["time"].c_str(),NULL,10);
-            struct tm *timeinfo = localtime(&unixTime);
             
-            char timeStr[20];
-            if (((long)now-86000)<(long)time)
-                strftime(timeStr, sizeof(timeStr), "%I:%M:%S %p", timeinfo);
-            else
-                strftime(timeStr, sizeof(timeStr), "%m/%d/%y %I:%M:%S %p", timeinfo);
+            CString timeString;
+            CString prefixString;
+            if (m_pClient->HasServerTime()) {
+                char timeStr[20];
+                snprintf(timeStr, sizeof(timeStr), "%lu", unixTime);
+                prefixString = "@t=";
+                prefixString += timeStr;
+                prefixString += " ";
+            } else {
+                struct tm *timeinfo = localtime(&unixTime);
+                char timeStr[20];
+                if (((long)now-86000)<(long)time)
+                    strftime(timeStr, sizeof(timeStr), "%I:%M:%S %p", timeinfo);
+                else
+                    strftime(timeStr, sizeof(timeStr), "%m/%d/%y %I:%M:%S %p", timeinfo);
+                timeString = "[";
+                timeString += timeStr;
+                timeString += "] ";
+            }
             
             if (data["type"].Equals("DISCONNECT")) {
-                PutUser(":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :["+timeStr+"] Server Disconnected");
+                PutUser(prefixString+":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :"+timeString+"Server Disconnected");
             } else if (data["type"].Equals("CONNECT")) {
-                PutUser(":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :["+timeStr+"] Server Connected");
+                PutUser(prefixString+":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :"+timeString+"Server Connected");
             } else if (data["type"].Equals("JOIN")) {
-                PutUser(":"+data["nick"]+" NOTICE "+data["target"]+" :["+timeStr+"] joined");
+                PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"joined");
             } else if (data["type"].Equals("PART")) {
                 if (data["message"].Equals(""))
-                    PutUser(":"+data["nick"]+" NOTICE "+data["target"]+" :["+timeStr+"] parted");
+                    PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"parted");
                 else
-                    PutUser(":"+data["nick"]+" NOTICE "+data["target"]+" :["+timeStr+"] parted: "+data["message"]);
+                    PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"parted: "+data["message"]);
             } else if (data["type"].Equals("TOPIC")) {
-                PutUser(":"+data["nick"]+" NOTICE "+data["target"]+" :["+timeStr+"] changed topic: "+data["message"]);
+                PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"changed topic: "+data["message"]);
             } else if (data["type"].Equals("QUIT")) {
                 if (data["message"].Equals(""))
-                    PutUser(":"+data["nick"]+" NOTICE "+data["target"]+" :["+timeStr+"] quit");
+                    PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"quit");
                 else
-                    PutUser(":"+data["nick"]+" NOTICE "+data["target"]+" :["+timeStr+"] quit: "+data["message"]);
+                    PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"quit: "+data["message"]);
             } else if (data["type"].Equals("MODE")) {
-                PutUser(":"+data["nick"]+" NOTICE "+data["target"]+" :["+timeStr+"] changed mode: "+data["message"]);
+                PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"changed mode: "+data["message"]);
             } else if (data["type"].Equals("ACTION")) {
-                PutUser(":"+data["nick"]+" PRIVMSG "+data["target"]+" :\001ACTION ["+timeStr+"] "+data["message"]+"\001");
+                PutUser(prefixString+":"+data["nick"]+" PRIVMSG "+data["target"]+" :\001ACTION "+timeString+data["message"]+"\001");
             } else {
-                PutUser(":"+data["nick"]+" "+data["type"]+" "+data["target"]+" :["+timeStr+"] "+data["message"]);
+                PutUser(prefixString+":"+data["nick"]+" "+data["type"]+" "+data["target"]+" :"+timeString+data["message"]);
             }
         }
         
