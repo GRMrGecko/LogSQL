@@ -41,9 +41,12 @@ public:
         AddCommand("ReplayAll", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::ReplayAllCommand), "[1|0]", "Replay all messages stored.");
         AddCommand("LogLimit", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::LogLimitCommand), "[0-9]+", "Limit the amount of items to store into the log.");
         AddCommand("LogLevel", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::LogLevelCommand), "[0-4]", "Log level.");
+        
         AddCommand("AddIgnore", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::AddIgnoreCommand), "Type[nick|chan] Target", "Add to ignore list.");
         AddCommand("RemoveIgnore", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::RemoveIgnoreCommand), "Type[nick|chan] Target", "Remove from ignore list.");
         AddCommand("IgnoreList", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::IgnoreListCommand), "", "View what is currently ignored.");
+        
+        AddCommand("DoNotTrack", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::DoNotTrack), "", "Adds the current session to the do not track disconnect list.");
     }
     
     void HostCommand(const CString &sLine) {
@@ -280,6 +283,18 @@ public:
                 PutModule(*it);
             }
         }
+    }
+    
+    void DoNotTrack(const CString &sLine) {
+        bool tracking = true;
+        for (vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
+            if (*it==m_pClient) {
+                tracking = false;
+                break;
+            }
+        }
+        if (tracking)
+            doNotTrackClient.push_back(m_pClient);
     }
     
     virtual bool OnLoad(const CString& sArgs, CString& sMessage) {
@@ -1067,9 +1082,16 @@ public:
     }
     
     virtual void OnClientDisconnect() {
-        if (!m_pNetwork->IsUserAttached()) {
-            SetSetting("clientDisconnected",GetUNIXTime());
+        bool track = true;
+        for (vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
+            if (*it==m_pClient) {
+                doNotTrackClient.erase(it);
+                track = false;
+                break;
+            }
         }
+        if (track)
+            SetSetting("clientDisconnected",GetUNIXTime());
     }
     
     void Replay() {
@@ -1243,6 +1265,8 @@ private:
     
     vector<CString> nickIgnoreList;
     vector<CString> chanIgnoreList;
+    
+    vector<CClient *> doNotTrackClient;
 };
 
 template<> void TModInfo<CLogMySQL>(CModInfo& Info) {
