@@ -239,7 +239,7 @@ public:
                     SetSetting("replayAll","0");
                     SetSetting("logLimit","1");
                     SetSetting("logLevel","1");
-                    SetSetting("version","1");
+                    SetSetting("version","2");
                 }
             }
         }
@@ -251,7 +251,7 @@ public:
             }
             sqlite3_finalize(result);
             if (status!=SQLITE_ROW) {
-                status = sqlite3_prepare(database, "CREATE TABLE `messages` (`target` text, `nick` text, `type` text, `message` text, `time` real(20,5))", -1, &result, NULL);
+                status = sqlite3_prepare(database, "CREATE TABLE `messages` (`target` text, `nick` text, `type` text, `message` text, `time` real(20,5) PRIMARY KEY)", -1, &result, NULL);
                 if (status==SQLITE_OK) {
                     sqlite3_step(result);
                     sqlite3_finalize(result);
@@ -278,9 +278,55 @@ public:
         logLevel = atoi(GetSetting("logLevel").c_str());
         
         unsigned long version = strtoul(GetSetting("version").c_str(), NULL, 10);
-        if (version==0)
+        if (version==0) {
             SetSetting("version","1");
-        
+			version = 1;
+		}
+		if (version==1) {
+			status = sqlite3_prepare(database, "BEGIN TRANSACTION", -1, &result, NULL);
+			if (status==SQLITE_OK) {
+				sqlite3_step(result);
+				sqlite3_finalize(result);
+			}
+			status = sqlite3_prepare(database, "CREATE TEMPORARY TABLE `messages_backup` (`target` text, `nick` text, `type` text, `message` text, `time` real(20,5))", -1, &result, NULL);
+			if (status==SQLITE_OK) {
+				sqlite3_step(result);
+				sqlite3_finalize(result);
+			}
+			status = sqlite3_prepare(database, "INSERT INTO `messages_backup` SELECT * FROM `messages`", -1, &result, NULL);
+			if (status==SQLITE_OK) {
+				sqlite3_step(result);
+				sqlite3_finalize(result);
+			}
+			status = sqlite3_prepare(database, "DROP TABLE `messages`", -1, &result, NULL);
+			if (status==SQLITE_OK) {
+				sqlite3_step(result);
+				sqlite3_finalize(result);
+			}
+			status = sqlite3_prepare(database, "CREATE TABLE `messages` (`target` text, `nick` text, `type` text, `message` text, `time` real(20,5) PRIMARY KEY)", -1, &result, NULL);
+			if (status==SQLITE_OK) {
+				sqlite3_step(result);
+				sqlite3_finalize(result);
+			}
+			status = sqlite3_prepare(database, "INSERT INTO `messages` SELECT * FROM `messages_backup`", -1, &result, NULL);
+			if (status==SQLITE_OK) {
+				sqlite3_step(result);
+				sqlite3_finalize(result);
+			}
+			status = sqlite3_prepare(database, "DROP TABLE `messages_backup`", -1, &result, NULL);
+			if (status==SQLITE_OK) {
+				sqlite3_step(result);
+				sqlite3_finalize(result);
+			}
+			status = sqlite3_prepare(database, "COMMIT", -1, &result, NULL);
+			if (status==SQLITE_OK) {
+				sqlite3_step(result);
+				sqlite3_finalize(result);
+			}
+			SetSetting("version","2");
+			version = 2;
+        }
+		
         UpdateIgnoreLists();
         
         return true;
