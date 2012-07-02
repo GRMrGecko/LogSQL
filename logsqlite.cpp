@@ -208,9 +208,9 @@ public:
         }
         if (tracking) {
             doNotTrackClient.push_back(m_pClient);
-			PutUser(":*LogMySQL!LogMySQL@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Added session to do not track list.");
+			PutUser(":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Added session to do not track list.");
 		} else {
-			PutUser(":*LogMySQL!LogMySQL@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Already added session to do not track list.");
+			PutUser(":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Already added session to do not track list.");
 		}
     }
     
