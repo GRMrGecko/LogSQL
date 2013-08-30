@@ -1233,6 +1233,8 @@ public:
                     PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"quit: "+data["message"]);
             } else if (data["type"].Equals("MODE")) {
                 PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"changed mode: "+data["message"]);
+            } else if (data["type"].Equals("NICK")) {
+                PutUser(prefixString+":"+data["nick"]+" NOTICE "+data["target"]+" :"+timeString+"changed nick: "+data["message"]);
             } else if (data["type"].Equals("ACTION")) {
                 PutUser(prefixString+":"+data["nick"]+" PRIVMSG "+data["target"]+" :\001ACTION "+timeString+data["message"]+"\001");
             } else {
