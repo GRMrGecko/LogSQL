@@ -37,8 +37,9 @@ public:
         AddCommand("DatabaseName", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::DatabaseNameCommand), "[a-z0-9]+", "MySQL database name.");
         AddCommand("Connect", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::ConnectCommand), "", "Reconnect to the MySQL database.");
         
-        AddCommand("Replay", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::ReplayCommand), "", "Play back the messages received.");
+        AddCommand("Replay", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::ReplayCommand), "[0-9]*", "Play back the messages received.");
         AddCommand("ReplayAll", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::ReplayAllCommand), "[1|0]", "Replay all messages stored.");
+		AddCommand("AutoReplay", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::AutoReplayCommand), "[1|0]", "Replay on connect.");
         AddCommand("LogLimit", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::LogLimitCommand), "[0-9]+", "Limit the amount of items to store into the log.");
         AddCommand("LogLevel", static_cast<CModCommand::ModCmdFunc>(&CLogMySQL::LogLevelCommand), "[0-4]", "Log level.");
         
@@ -129,11 +130,16 @@ public:
     }
     
     
-    void ReplayCommand(const CString &sLine) {
-        Replay();
-        PutModule("Replayed");
-    }
-    
+	void ReplayCommand(const CString &sLine) {
+		CString sArgs = sLine.Token(1, true);
+		if (!sArgs.empty()) {
+			Replay(sArgs.ToInt());
+		} else {
+			Replay();
+		}
+		PutModule("Replayed");
+	}
+	
     void ReplayAllCommand(const CString &sLine) {
         CString sArgs = sLine.Token(1, true);
         bool help = sArgs.Equals("HELP");
@@ -149,8 +155,25 @@ public:
         CString status = (replayAll ? "On" : "Off");
         CString now = (sArgs.empty() || help ? "" : "now ");
         PutModule("ReplayAll is "+now+"set to: "+status);
-    }
-    
+	}
+	
+	void AutoReplayCommand(const CString &sLine) {
+		CString sArgs = sLine.Token(1, true);
+		bool help = sArgs.Equals("HELP");
+		
+		if (help) {
+			PutModule("On: Replay on connect.");
+			PutModule("Off: Require replay command to replay.");
+		} else if (!sArgs.empty()) {
+			autoReplay = sArgs.ToBool();
+			SetSetting("autoReplay", (autoReplay ? "1" : "0"));
+		}
+		
+		CString status = (autoReplay ? "On" : "Off");
+		CString now = (sArgs.empty() || help ? "" : "now ");
+		PutModule("AutoReplay is "+now+"set to: "+status);
+	}
+	
     void LogLimitCommand(const CString &sLine) {
         CString sArgs = sLine.Token(1, true);
         bool help = sArgs.Equals("HELP");
@@ -269,7 +292,7 @@ public:
         } else {
             PutModule("Nick ignore list contains:");
             
-            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
                 PutModule(*it);
             }
         }
@@ -279,7 +302,7 @@ public:
         } else {
             PutModule("Channel ignore list contains:");
             
-            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
                 PutModule(*it);
             }
         }
@@ -287,7 +310,7 @@ public:
     
     void DoNotTrack(const CString &sLine) {
         bool tracking = true;
-        for (vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
+        for (std::vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
             if (*it==m_pClient) {
                 tracking = false;
                 break;
@@ -339,7 +362,7 @@ public:
                 void *theRet = mysql_real_connect(database, host.c_str(), username.c_str(), password.c_str(), databaseName.c_str(), (unsigned int)strtoul(port.c_str(), NULL, 10), MYSQL_UNIX_ADDR, CLIENT_COMPRESS);
                 databaseConnected = (theRet==database);
                 if (databaseConnected) {
-                    cout << "LogMySQL: Database connected.\n";
+                    std::cout << "LogMySQL: Database connected.\n";
                     
                     MYSQL_RES *settings = mysql_list_tables(database, "settings");
                     if (mysql_num_rows(settings)==0) {
@@ -349,10 +372,11 @@ public:
                             mysql_stmt_execute(statement);
                             mysql_stmt_close(statement);
                             
-                            SetSetting("replayAll","0");
+							SetSetting("replayAll","0");
+							SetSetting("autoReplay","1");
                             SetSetting("logLimit","1");
                             SetSetting("logLevel","1");
-                            SetSetting("version","1");
+                            SetSetting("version","2");
                         }
                     }
                     if (settings!=NULL)
@@ -380,15 +404,24 @@ public:
                     if (ignorelist!=NULL)
                         mysql_free_result(ignorelist);
                     
-                    replayAll = atoi(GetSetting("replayAll").c_str());
-                    logLimit = strtoul(GetSetting("logLimit").c_str(), NULL, 10);
-                    logLevel = atoi(GetSetting("logLevel").c_str());
-                    
                     unsigned long version = strtoul(GetSetting("version").c_str(), NULL, 10);
-                    if (version==0)
+					if (version==0) {
                         SetSetting("version","1");
+						version = 1;
+					}
+					if (version==1) {
+						SetSetting("autoReplay","1");
+						SetSetting("version","2");
+						version = 2;
+					}
+					
+					replayAll = atoi(GetSetting("replayAll").c_str());
+					autoReplay = atoi(GetSetting("autoReplay").c_str());
+					logLimit = strtoul(GetSetting("logLimit").c_str(), NULL, 10);
+					logLevel = atoi(GetSetting("logLevel").c_str());
+					
                 } else {
-                    cout << "LogMySQL: Database unable to connect.\n";
+                    std::cout << "LogMySQL: Database unable to connect.\n";
                 }
             }
         }
@@ -419,28 +452,28 @@ public:
         bind[0].buffer_type = MYSQL_TYPE_STRING;
         bind[0].buffer = (void*)target.c_str();
         bind[0].buffer_length = target.length();
-        bind[0].is_null = false;
+        bind[0].is_null = (my_bool *)0;
         
         bind[1].buffer_type = MYSQL_TYPE_STRING;
         bind[1].buffer = (void*)nick.c_str();
         bind[1].buffer_length = nick.length();
-        bind[1].is_null = false;
+        bind[1].is_null = (my_bool *)0;
         
         bind[2].buffer_type = MYSQL_TYPE_STRING;
         bind[2].buffer = (void*)type.c_str();
         bind[2].buffer_length = type.length();
-        bind[2].is_null = false;
+        bind[2].is_null = (my_bool *)0;
         
         bind[3].buffer_type = MYSQL_TYPE_STRING;
         bind[3].buffer = (void*)message.c_str();
         bind[3].buffer_length = message.length();
-        bind[3].is_null = false;
+        bind[3].is_null = (my_bool *)0;
         
         CString time = GetUNIXTime();
         bind[4].buffer_type = MYSQL_TYPE_STRING;
         bind[4].buffer = (void*)time.c_str();
         bind[4].buffer_length = time.length();
-        bind[4].is_null = false;
+        bind[4].is_null = (my_bool *)0;
         
         status = mysql_stmt_bind_param(statement, bind);
         if (status!=0) {
@@ -468,7 +501,7 @@ public:
             if (dataCount!=1) {
                 mysql_free_result(result);
                 mysql_stmt_close(statement);
-                cout << "LogMySQL: We are only suppose to receive 1 field. We received the count of " << dataCount << " fields.\n";
+                std::cout << "LogMySQL: We are only suppose to receive 1 field. We received the count of " << dataCount << " fields.\n";
                 return;
             }
             MYSQL_FIELD *fields = mysql_fetch_fields(result);
@@ -526,7 +559,7 @@ public:
                 if (dataCount!=1) {
                     mysql_free_result(result);
                     mysql_stmt_close(statement);
-                    cout << "LogMySQL: We are only suppose to receive 1 field. We received the count of " << dataCount << " fields.\n";
+                    std::cout << "LogMySQL: We are only suppose to receive 1 field. We received the count of " << dataCount << " fields.\n";
                     return;
                 }
                 fields = mysql_fetch_fields(result);
@@ -563,7 +596,7 @@ public:
                     bind2[0].buffer_type = MYSQL_TYPE_STRING;
                     bind2[0].buffer = (void*)rowid.c_str();
                     bind2[0].buffer_length = rowid.length();
-                    bind2[0].is_null = false;
+                    bind2[0].is_null = (my_bool *)0;
                     
                     status = mysql_stmt_bind_param(statement2, bind2);
                     if (status!=0) {
@@ -592,7 +625,7 @@ public:
             bind[0].buffer_type = MYSQL_TYPE_STRING;
             bind[0].buffer = (void*)name.c_str();
             bind[0].buffer_length = name.length();
-            bind[0].is_null = false;
+            bind[0].is_null = (my_bool *)0;
             
             status = mysql_stmt_bind_param(statement, bind);
             if (status==0) {
@@ -617,12 +650,12 @@ public:
             bind[0].buffer_type = MYSQL_TYPE_STRING;
             bind[0].buffer = (void*)value.c_str();
             bind[0].buffer_length = value.length();
-            bind[0].is_null = false;
+            bind[0].is_null = (my_bool *)0;
             
             bind[1].buffer_type = MYSQL_TYPE_STRING;
             bind[1].buffer = (void*)name.c_str();
             bind[1].buffer_length = name.length();
-            bind[1].is_null = false;
+            bind[1].is_null = (my_bool *)0;
             
             status = mysql_stmt_bind_param(statement, bind);
             if (status!=0) {
@@ -643,12 +676,12 @@ public:
             bind[0].buffer_type = MYSQL_TYPE_STRING;
             bind[0].buffer = (void*)name.c_str();
             bind[0].buffer_length = name.length();
-            bind[0].is_null = false;
+            bind[0].is_null = (my_bool *)0;
             
             bind[1].buffer_type = MYSQL_TYPE_STRING;
             bind[1].buffer = (void*)value.c_str();
             bind[1].buffer_length = value.length();
-            bind[1].is_null = false;
+            bind[1].is_null = (my_bool *)0;
             
             status = mysql_stmt_bind_param(statement, bind);
             if (status!=0) {
@@ -673,7 +706,7 @@ public:
         bind[0].buffer_type = MYSQL_TYPE_STRING;
         bind[0].buffer = (void*)name.c_str();
         bind[0].buffer_length = name.length();
-        bind[0].is_null = false;
+        bind[0].is_null = (my_bool *)0;
         
         status = mysql_stmt_bind_param(statement, bind);
         if (status!=0) {
@@ -691,7 +724,7 @@ public:
         if (dataCount!=1) {
             mysql_free_result(result);
             mysql_stmt_close(statement);
-            cout << "LogMySQL: Settings are only suppose to return 1 as the field count. We received the count of " << dataCount << " fields.\n";
+            std::cout << "LogMySQL: Settings are only suppose to return 1 as the field count. We received the count of " << dataCount << " fields.\n";
             return stringValue;
         }
         MYSQL_FIELD *fields = mysql_fetch_fields(result);
@@ -816,12 +849,12 @@ public:
             bind[0].buffer_type = MYSQL_TYPE_STRING;
             bind[0].buffer = (void*)type.c_str();
             bind[0].buffer_length = type.length();
-            bind[0].is_null = false;
+            bind[0].is_null = (my_bool *)0;
             
             bind[1].buffer_type = MYSQL_TYPE_STRING;
             bind[1].buffer = (void*)target.c_str();
             bind[1].buffer_length = target.length();
-            bind[1].is_null = false;
+            bind[1].is_null = (my_bool *)0;
             
             status = mysql_stmt_bind_param(statement, bind);
             if (status!=0) {
@@ -853,12 +886,12 @@ public:
             bind[0].buffer_type = MYSQL_TYPE_STRING;
             bind[0].buffer = (void*)type.c_str();
             bind[0].buffer_length = type.length();
-            bind[0].is_null = false;
+            bind[0].is_null = (my_bool *)0;
             
             bind[1].buffer_type = MYSQL_TYPE_STRING;
             bind[1].buffer = (void*)target.c_str();
             bind[1].buffer_length = target.length();
-            bind[1].is_null = false;
+            bind[1].is_null = (my_bool *)0;
             
             status = mysql_stmt_bind_param(statement, bind);
             if (status!=0) {
@@ -876,12 +909,12 @@ public:
     }
     bool IgnoreExists(const CString& type, const CString& target) {
         if (type.Equals("nick")) {
-            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
                 if (target.Equals(*it))
                     return true;
             }
         } else if (type.Equals("chan")) {
-            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
                 if (target.Equals(*it))
                     return true;
             }
@@ -890,12 +923,12 @@ public:
     }
     bool IsIgnored(const CString& type, const CString& target) {
         if (type.Equals("nick")) {
-            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
                 if (target.WildCmp(*it))
                     return true;
             }
         } else if (type.Equals("chan")) {
-            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
                 if (target.WildCmp(*it))
                     return true;
             }
@@ -979,9 +1012,9 @@ public:
         }
     }
     
-    virtual void OnQuit(const CNick& Nick, const CString& sMessage, const vector<CChan*>& vChans) {
+    virtual void OnQuit(const CNick& Nick, const CString& sMessage, const std::vector<CChan*>& vChans) {
         if (logLevel>=2) {
-            vector<CChan*>::const_iterator it;
+            std::vector<CChan*>::const_iterator it;
             for (it=vChans.begin(); it!=vChans.end(); it++) {
                 CChan& channel = **it;
                 AddMessage(channel.GetName(),Nick.GetNickMask(),"QUIT",sMessage);
@@ -997,13 +1030,13 @@ public:
     
     virtual void OnPart(const CNick& Nick, CChan& Channel, const CString& sMessage) {
         if (logLevel>=2) {
-            AddMessage(Channel.GetName(),Nick.GetNickMask(),"JOIN",sMessage);
+            AddMessage(Channel.GetName(),Nick.GetNickMask(),"PART",sMessage);
         }
     }
     
-    virtual void OnNick(const CNick& OldNick, const CString& sNewNick, const vector<CChan*>& vChans) {
+    virtual void OnNick(const CNick& OldNick, const CString& sNewNick, const std::vector<CChan*>& vChans) {
         if (logLevel>=2) {
-            vector<CChan*>::const_iterator it;
+            std::vector<CChan*>::const_iterator it;
             for (it=vChans.begin(); it!=vChans.end(); it++) {
                 CChan& channel = **it;
                 AddMessage(channel.GetName(),OldNick.GetNickMask(),"NICK",sNewNick);
@@ -1082,12 +1115,13 @@ public:
     //Client Connection
     virtual void OnClientLogin() {
         SetSetting("clientConnected",GetUNIXTime());
-        Replay();
+		if (autoReplay)
+			Replay();
     }
     
     virtual void OnClientDisconnect() {
         bool track = true;
-        for (vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
+        for (std::vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
             if (*it==m_pClient) {
                 doNotTrackClient.erase(it);
                 track = false;
@@ -1098,7 +1132,11 @@ public:
             SetSetting("clientDisconnected",GetUNIXTime());
     }
     
-    void Replay() {
+	void Replay() {
+		Replay(0);
+	}
+	
+	void Replay(int replayCount) {
         if (!databaseConnected)
             return;
         PutUser(":*LogMySQL!LogMySQL@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Buffer Playback...");
@@ -1107,7 +1145,28 @@ public:
         
         MYSQL_STMT *statement = mysql_stmt_init(database);
         int status = 0;
-        if (!replayAll && !lastOnline.empty()) {
+		if (replayCount!=0) {
+			status = mysql_stmt_prepare(statement, "SELECT * FROM (SELECT * FROM `messages` ORDER BY `time` DESC LIMIT ?) ORDER BY `time`", 85);
+			if (status!=0) {
+				PutUser(":*LogMySQL!LogMySQL@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Playback failed due to sql problem.");
+				return;
+			}
+			
+			MYSQL_BIND bind[1];
+			memset(bind, 0, sizeof(bind));
+			
+			bind[0].buffer_type = MYSQL_TYPE_LONG;
+			bind[0].buffer = (void*)&replayCount;
+			bind[0].buffer_length = 0;
+			bind[0].is_null = (my_bool *)0;
+			
+			status = mysql_stmt_bind_param(statement, bind);
+			if (status!=0) {
+				PutUser(":*LogMySQL!LogMySQL@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Playback failed due to sql problem.");
+				mysql_stmt_close(statement);
+				return;
+			}
+		} else if (!replayAll && !lastOnline.empty()) {
             status = mysql_stmt_prepare(statement, "SELECT * FROM `messages` WHERE `time`>? ORDER BY `time`", 55);
             if (status!=0) {
                 PutUser(":*LogMySQL!LogMySQL@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Playback failed due to sql problem.");
@@ -1120,7 +1179,7 @@ public:
             bind[0].buffer_type = MYSQL_TYPE_STRING;
             bind[0].buffer = (void*)lastOnline.c_str();
             bind[0].buffer_length = lastOnline.length();
-            bind[0].is_null = false;
+            bind[0].is_null = (my_bool *)0;
             
             status = mysql_stmt_bind_param(statement, bind);
             if (status!=0) {
@@ -1149,10 +1208,10 @@ public:
         MYSQL_FIELD *fields = mysql_fetch_fields(result);    
         MYSQL_BIND results[columnCount];
         memset(results, 0, sizeof(results));
-        map<unsigned int,char *> columnData;
-        map<unsigned int,unsigned long> columnLength;
-        map<unsigned int,bool> columnNull;
-        map<unsigned int,CString> columns;
+        std::map<unsigned int,char *> columnData;
+        std::map<unsigned int,unsigned long> columnLength;
+        std::map<unsigned int,bool> columnNull;
+        std::map<unsigned int,CString> columns;
         for (unsigned int i=0; i<columnCount; i++) {
             columns[i] = CString(fields[i].name);
             if (columns[i].empty()) {
@@ -1182,7 +1241,7 @@ public:
             if (status!=0)
                 break;
             
-            map<CString,CString> data;
+            std::map<CString,CString> data;
             for (unsigned int i=0; i<columnCount; i++) {
                 if (columnNull[i]) {
                     data[columns[i]] = "";
@@ -1265,14 +1324,15 @@ private:
     MYSQL *database;
     bool databaseConnected;
     bool connected;
-    bool replayAll;
+	bool replayAll;
+	bool autoReplay;
     unsigned long logLimit;
     int logLevel;
     
-    vector<CString> nickIgnoreList;
-    vector<CString> chanIgnoreList;
+    std::vector<CString> nickIgnoreList;
+    std::vector<CString> chanIgnoreList;
     
-    vector<CClient *> doNotTrackClient;
+    std::vector<CClient *> doNotTrackClient;
 };
 
 template<> void TModInfo<CLogMySQL>(CModInfo& Info) {

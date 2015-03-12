@@ -30,8 +30,9 @@ class CLogSQLite : public CModule {
 public:
     MODCONSTRUCTOR(CLogSQLite) {
         AddHelpCommand();
-        AddCommand("Replay", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::ReplayCommand), "", "Play back the messages received.");
-        AddCommand("ReplayAll", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::ReplayAllCommand), "[1|0]", "Replay all messages stored.");
+        AddCommand("Replay", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::ReplayCommand), "[0-9]*", "Play back messages received since last recorded disconnect or to count.");
+		AddCommand("ReplayAll", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::ReplayAllCommand), "[1|0]", "Replay all messages stored.");
+		AddCommand("AutoReplay", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::AutoReplayCommand), "[1|0]", "Replay on connect.");
         AddCommand("LogLimit", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::LogLimitCommand), "[0-9]+", "Limit the amount of items to store into the log.");
         AddCommand("LogLevel", static_cast<CModCommand::ModCmdFunc>(&CLogSQLite::LogLevelCommand), "[0-4]", "Log level.");
         
@@ -43,7 +44,12 @@ public:
     }
     
     void ReplayCommand(const CString &sLine) {
-        Replay();
+		CString sArgs = sLine.Token(1, true);
+		if (!sArgs.empty()) {
+			Replay(sArgs.ToInt());
+		} else {
+			Replay();
+		}
         PutModule("Replayed");
     }
     
@@ -61,9 +67,26 @@ public:
         
         CString status = (replayAll ? "On" : "Off");
         CString now = (sArgs.empty() || help ? "" : "now ");
-        PutModule("ReplayAll is "+now+"set to: "+=status);
+        PutModule("ReplayAll is "+now+"set to: "+status);
     }
-    
+	
+	void AutoReplayCommand(const CString &sLine) {
+		CString sArgs = sLine.Token(1, true);
+		bool help = sArgs.Equals("HELP");
+		
+		if (help) {
+			PutModule("On: Replay on connect.");
+			PutModule("Off: Require replay command to replay.");
+		} else if (!sArgs.empty()) {
+			autoReplay = sArgs.ToBool();
+			SetSetting("autoReplay", (autoReplay ? "1" : "0"));
+		}
+		
+		CString status = (autoReplay ? "On" : "Off");
+		CString now = (sArgs.empty() || help ? "" : "now ");
+		PutModule("AutoReplay is "+now+"set to: "+status);
+	}
+	
     void LogLimitCommand(const CString &sLine) {
         CString sArgs = sLine.Token(1, true);
         bool help = sArgs.Equals("HELP");
@@ -182,7 +205,7 @@ public:
         } else {
             PutModule("Nick ignore list contains:");
             
-            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
                 PutModule(*it);
             }
         }
@@ -192,7 +215,7 @@ public:
         } else {
             PutModule("Channel ignore list contains:");
             
-            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
                 PutModule(*it);
             }
         }
@@ -200,7 +223,7 @@ public:
     
     void DoNotTrack(const CString &sLine) {
         bool tracking = true;
-        for (vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
+        for (std::vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
             if (*it==m_pClient) {
                 tracking = false;
                 break;
@@ -236,10 +259,11 @@ public:
                     sqlite3_step(result);
                     sqlite3_finalize(result);
                     
-                    SetSetting("replayAll","0");
+					SetSetting("replayAll","0");
+					SetSetting("autoReplay","1");
                     SetSetting("logLimit","1");
                     SetSetting("logLevel","1");
-                    SetSetting("version","2");
+                    SetSetting("version","3");
                 }
             }
         }
@@ -273,9 +297,6 @@ public:
                 }
             }
         }
-        replayAll = atoi(GetSetting("replayAll").c_str());
-        logLimit = strtoul(GetSetting("logLimit").c_str(), NULL, 10);
-        logLevel = atoi(GetSetting("logLevel").c_str());
         
         unsigned long version = strtoul(GetSetting("version").c_str(), NULL, 10);
         if (version==0) {
@@ -326,6 +347,16 @@ public:
 			SetSetting("version","2");
 			version = 2;
         }
+		if (version==2) {
+			SetSetting("autoReplay","1");
+			SetSetting("version","3");
+			version = 3;
+		}
+		
+		replayAll = atoi(GetSetting("replayAll").c_str());
+		autoReplay = atoi(GetSetting("autoReplay").c_str());
+		logLimit = strtoul(GetSetting("logLimit").c_str(), NULL, 10);
+		logLevel = atoi(GetSetting("logLevel").c_str());
 		
         UpdateIgnoreLists();
         
@@ -404,7 +435,7 @@ public:
             int dataCount = sqlite3_data_count(result);
             if (dataCount!=1) {
                 sqlite3_finalize(result);
-                cout << "LogSQLite: We are only suppose to receive 1 field. We received the count of " << dataCount << " fields.\n";
+                std::cout << "LogSQLite: We are only suppose to receive 1 field. We received the count of " << dataCount << " fields.\n";
                 return;
             }
             unsigned long count = strtoul((const char *)sqlite3_column_text(result, 0), NULL, 10);
@@ -433,7 +464,7 @@ public:
                     dataCount = sqlite3_data_count(result);
                     if (dataCount!=1) {
                         sqlite3_finalize(result);
-                        cout << "LogSQLite: We are only suppose to receive 1 field. We received the count of " << dataCount << " fields.\n";
+                        std::cout << "LogSQLite: We are only suppose to receive 1 field. We received the count of " << dataCount << " fields.\n";
                         break;
                     }
                     
@@ -486,7 +517,6 @@ public:
             }
             status = sqlite3_bind_text(result, 2, name.c_str(), name.length(), SQLITE_STATIC);
             if (status!=SQLITE_OK) {
-
                 sqlite3_finalize(result);
                 return;
             }
@@ -533,7 +563,7 @@ public:
             int dataCount = sqlite3_data_count(result);
             if (dataCount!=1) {
                 sqlite3_finalize(result);
-                cout << "LogSQLite: Settings are only suppose to return 1 as the field count. We received the count of " << dataCount << " fields.\n";
+                std::cout << "LogSQLite: Settings are only suppose to return 1 as the field count. We received the count of " << dataCount << " fields.\n";
                 return stringValue;
             }
             stringValue = CString((const char *)sqlite3_column_text(result, 0));
@@ -640,12 +670,12 @@ public:
     }
     bool IgnoreExists(const CString& type, const CString& target) {
         if (type.Equals("nick")) {
-            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
                 if (target.Equals(*it))
                     return true;
             }
         } else if (type.Equals("chan")) {
-            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
                 if (target.Equals(*it))
                     return true;
             }
@@ -654,12 +684,12 @@ public:
     }
     bool IsIgnored(const CString& type, const CString& target) {
         if (type.Equals("nick")) {
-            for (vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=nickIgnoreList.begin(); it<nickIgnoreList.end(); it++) {
                 if (target.WildCmp(*it))
                     return true;
             }
         } else if (type.Equals("chan")) {
-            for (vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
+            for (std::vector<CString>::iterator it=chanIgnoreList.begin(); it<chanIgnoreList.end(); it++) {
                 if (target.WildCmp(*it))
                     return true;
             }
@@ -743,9 +773,9 @@ public:
         }
     }
     
-    virtual void OnQuit(const CNick& Nick, const CString& sMessage, const vector<CChan*>& vChans) {
+    virtual void OnQuit(const CNick& Nick, const CString& sMessage, const std::vector<CChan*>& vChans) {
         if (logLevel>=2) {
-            vector<CChan*>::const_iterator it;
+            std::vector<CChan*>::const_iterator it;
             for (it=vChans.begin(); it!=vChans.end(); it++) {
                 CChan& channel = **it;
                 AddMessage(channel.GetName(),Nick.GetNickMask(),"QUIT",sMessage);
@@ -761,13 +791,13 @@ public:
     
     virtual void OnPart(const CNick& Nick, CChan& Channel, const CString& sMessage) {
         if (logLevel>=2) {
-            AddMessage(Channel.GetName(),Nick.GetNickMask(),"JOIN",sMessage);
+            AddMessage(Channel.GetName(),Nick.GetNickMask(),"PART",sMessage);
         }
     }
     
-    virtual void OnNick(const CNick& OldNick, const CString& sNewNick, const vector<CChan*>& vChans) {
+    virtual void OnNick(const CNick& OldNick, const CString& sNewNick, const std::vector<CChan*>& vChans) {
         if (logLevel>=2) {
-            vector<CChan*>::const_iterator it;
+            std::vector<CChan*>::const_iterator it;
             for (it=vChans.begin(); it!=vChans.end(); it++) {
                 CChan& channel = **it;
                 AddMessage(channel.GetName(),OldNick.GetNickMask(),"NICK",sNewNick);
@@ -846,12 +876,13 @@ public:
     //Client Connection
     virtual void OnClientLogin() {
         SetSetting("clientConnected",GetUNIXTime());
-        Replay();
+		if (autoReplay)
+			Replay();
     }
     
     virtual void OnClientDisconnect() {
         bool track = true;
-        for (vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
+        for (std::vector<CClient *>::iterator it=doNotTrackClient.begin(); it<doNotTrackClient.end(); it++) {
             if (*it==m_pClient) {
                 doNotTrackClient.erase(it);
                 track = false;
@@ -861,15 +892,31 @@ public:
         if (track)
             SetSetting("clientDisconnected",GetUNIXTime());
     }
-    
-    void Replay() {
+	
+	void Replay() {
+		Replay(0);
+	}
+	
+    void Replay(int replayCount) {
         PutUser(":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Buffer Playback...");
         
         CString lastOnline = GetSetting("clientDisconnected");
         
         sqlite3_stmt *result;
         int status = SQLITE_OK;
-        if (!replayAll && !lastOnline.empty()) {
+		if (replayCount!=0) {
+			status = sqlite3_prepare(database, "SELECT * FROM (SELECT * FROM `messages` ORDER BY `time` DESC LIMIT ?) ORDER BY `time`", -1, &result, NULL);
+			if (status!=SQLITE_OK) {
+				PutUser(":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Playback failed due to sql problem.");
+				return;
+			}
+			status = sqlite3_bind_int(result, 1, replayCount);
+			if (status!=SQLITE_OK) {
+				PutUser(":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Playback failed due to sql problem.");
+				sqlite3_finalize(result);
+				return;
+			}
+		} else if (!replayAll && !lastOnline.empty()) {
             status = sqlite3_prepare(database, "SELECT * FROM `messages` WHERE `time`>? ORDER BY `time`", -1, &result, NULL);
             if (status!=SQLITE_OK) {
                 PutUser(":*LogSQLite!LogSQLite@znc.in NOTICE "+m_pNetwork->GetIRCNick().GetNickMask()+" :Playback failed due to sql problem.");
@@ -890,7 +937,7 @@ public:
         }
         
         int columnCount = sqlite3_column_count(result);
-        map<int,CString> columns;
+        std::map<int,CString> columns;
         for (int i=0; i<columnCount; i++) {
             columns[i] = CString(sqlite3_column_name(result, i));
         }
@@ -904,7 +951,7 @@ public:
             if (status!=SQLITE_ROW)
                 break;
             
-            map<CString,CString> data;
+            std::map<CString,CString> data;
             int dataCount = sqlite3_data_count(result);
             for (int i=0; i<dataCount; i++) {
                 data[columns[i]] = CString((const char *)sqlite3_column_text(result, i));
@@ -977,14 +1024,15 @@ public:
 private:
     sqlite3 *database;
     bool connected;
-    bool replayAll;
+	bool replayAll;
+	bool autoReplay;
     unsigned long logLimit;
     int logLevel;
     
-    vector<CString> nickIgnoreList;
-    vector<CString> chanIgnoreList;
+    std::vector<CString> nickIgnoreList;
+    std::vector<CString> chanIgnoreList;
     
-    vector<CClient *> doNotTrackClient;
+    std::vector<CClient *> doNotTrackClient;
 };
 
 template<> void TModInfo<CLogSQLite>(CModInfo& Info) {
